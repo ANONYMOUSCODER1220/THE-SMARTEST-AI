@@ -1,10 +1,14 @@
-#necessary libraries
+# Necessary libraries
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision.transforms as
-transforms
-#teaching the Ai riddles and questions so that it can solve complex equations as it learns more and more
+import torchvision.transforms as transforms
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab import build_vocab_from_iterator
+from torch.utils.data import Dataset, DataLoader
+from transformers import BertModel
+
+# Teaching the AI riddles and questions so that it can solve complex equations as it learns more and more
 riddles = [
     "What has keys but can't open locks?",
     "What has a heart that doesn't beat?",
@@ -20,7 +24,6 @@ answers = [
     "888+88+8+8+8",
     "444+44+4+4+4"
 ]
-#Right now my Ai is a retard and doesn't understand english so I have to fix that now too.
 
 # Tokenize the riddles and answers
 tokenizer = get_tokenizer('basic_english')
@@ -32,8 +35,10 @@ def yield_tokens(data_iter):
     for data in data_iter:
         yield data
 
-riddles_vocab = build_vocab_from_iterator(yield_tokens(riddles_tokens))
-answers_vocab = build_vocab_from_iterator(yield_tokens(answers_tokens))
+riddles_vocab = build_vocab_from_iterator(yield_tokens(riddles_tokens), specials=["<unk>"])
+answers_vocab = build_vocab_from_iterator(yield_tokens(answers_tokens), specials=["<unk>"])
+riddles_vocab.set_default_index(riddles_vocab["<unk>"])
+answers_vocab.set_default_index(answers_vocab["<unk>"])
 
 # Convert tokenized riddles and answers into tensors (numbers)
 def text_pipeline(text):
@@ -45,10 +50,34 @@ answers_tensors = [text_pipeline(answer) for answer in answers]
 print(riddles_tensors)
 print(answers_tensors)
 
-#idk anymore
-import torch
-import torch.nn as nn
-from transformers import BertModel
+class RiddleDataset(Dataset):
+    def __init__(self, riddles, answers, tokenizer, riddles_vocab, answers_vocab):
+        self.riddles = riddles
+        self.answers = answers
+        self.tokenizer = tokenizer
+        self.riddles_vocab = riddles_vocab
+        self.answers_vocab = answers_vocab
+
+    def __len__(self):
+        return len(self.riddles)
+
+    def __getitem__(self, idx):
+        riddle = self.riddles[idx]
+        answer = self.answers[idx]
+        riddle_tensor = text_pipeline(riddle)
+        answer_tensor = text_pipeline(answer)
+        return {
+            'input_ids': riddle_tensor,
+            'attention_mask': torch.ones_like(riddle_tensor),
+            'label': answer_tensor[0]  # Assuming the first token represents the answer
+        }
+
+dataset = RiddleDataset(riddles, answers, tokenizer, riddles_vocab, answers_vocab)
+dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=lambda x: {
+    'input_ids': torch.nn.utils.rnn.pad_sequence([item['input_ids'] for item in x], batch_first=True),
+    'attention_mask': torch.nn.utils.rnn.pad_sequence([item['attention_mask'] for item in x], batch_first=True),
+    'label': torch.tensor([item['label'] for item in x])
+})
 
 class RiddleSolver(nn.Module):
     def __init__(self):
@@ -78,7 +107,6 @@ class RiddleSolver(nn.Module):
 
 # Create an instance of the RiddleSolver model
 model = RiddleSolver()
-import torch.optim as optim
 
 # Define Loss Function and Optimizer
 criterion = nn.CrossEntropyLoss()  # CrossEntropyLoss is suitable for multi-class classification
@@ -90,7 +118,8 @@ optimizer = optim.AdamW(model.parameters(), lr=2e-5)  # AdamW optimizer is recom
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 criterion.to(device)
-# Step 6: Train the AI Model
+
+# Train the AI Model
 def train_model(model, dataloader, criterion, optimizer, num_epochs):
     for epoch in range(num_epochs):
         model.train()  # Set the model to training mode
